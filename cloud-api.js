@@ -10,11 +10,29 @@
   }
 
   const SITE_KEY_STORAGE = 'pt_review_site_key_v5';
+  const BIN_CACHE_PREFIX = 'pt_cloud_bin_v6:';
   const PHOTO_CACHE = new Map();
   let MANIFEST_CACHE = null;
   let SEED_CACHE = { warehouse: null, full: null };
   let SESSION_CACHE = null;
   let WRITE_MUTEX = Promise.resolve();
+
+  function saveCachedBin(url, obj) {
+    if (!url || !obj) return;
+    try {
+      localStorage.setItem(BIN_CACHE_PREFIX + url, JSON.stringify(obj));
+    } catch {}
+  }
+
+  function loadCachedBin(url) {
+    if (!url) return null;
+    try {
+      const raw = localStorage.getItem(BIN_CACHE_PREFIX + url);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
 
   const te = new TextEncoder();
   const td = new TextDecoder();
@@ -125,21 +143,56 @@
     return `${window.location.origin}${cleanPath}/`;
   }
 
-  async function npGet(url) {
+  async function npGet(url, { timeoutMs = 3500, retries = 1 } = {}) {
     const sep = url.includes('?') ? '&' : '?';
-    const res = await fetch(`${url}${sep}_=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`Cloud read failed (${res.status})`);
-    return res.json();
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${url}${sep}_=${Date.now()}`, { cache: 'no-store', signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`Cloud read failed (${res.status})`);
+        const data = await res.json();
+        saveCachedBin(url, data);
+        return data;
+      } catch (e) {
+        clearTimeout(timer);
+        lastErr = e;
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    }
+    throw lastErr || new Error('Cloud read failed');
   }
 
-  async function npPost(url, obj) {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(obj),
-    });
-    if (!res.ok) throw new Error(`Cloud save failed (${res.status})`);
-    return res.json();
+  async function npPost(url, obj, { timeoutMs = 6000, retries = 1 } = {}) {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`Cloud save failed (${res.status})`);
+        const out = await res.json();
+        saveCachedBin(url, obj);
+        return out;
+      } catch (e) {
+        clearTimeout(timer);
+        lastErr = e;
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+    }
+    throw lastErr || new Error('Cloud save failed');
   }
 
   async function loadManifest() {
@@ -170,18 +223,33 @@
     return MANIFEST_CACHE;
   }
 
-  async function fetchAuthDir() {
+  async function fetchAuthDir({ strict = false } = {}) {
     const m = await loadManifest();
+    if (strict) {
+      const raw = await npGet(m.authBinUrl, { timeoutMs: 5000, retries: 1 });
+      if (raw && raw.enc_dir) {
+        return await aesDecryptJson(m.dirKeyBytes, raw.enc_dir);
+      }
+      throw new Error('Auth directory empty');
+    }
     try {
-      const raw = await npGet(m.authBinUrl);
+      const raw = await npGet(m.authBinUrl, { timeoutMs: 2800, retries: 1 });
       if (raw && raw.enc_dir) {
         return await aesDecryptJson(m.dirKeyBytes, raw.enc_dir);
       }
     } catch (e) {
+      const cached = loadCachedBin(m.authBinUrl);
+      if (cached && cached.enc_dir) {
+        return await aesDecryptJson(m.dirKeyBytes, cached.enc_dir);
+      }
       if (m.fallbackAuthDir) {
         return await aesDecryptJson(m.dirKeyBytes, m.fallbackAuthDir);
       }
       throw e;
+    }
+    const cached = loadCachedBin(m.authBinUrl);
+    if (cached && cached.enc_dir) {
+      return await aesDecryptJson(m.dirKeyBytes, cached.enc_dir);
     }
     if (m.fallbackAuthDir) {
       return await aesDecryptJson(m.dirKeyBytes, m.fallbackAuthDir);
@@ -194,7 +262,7 @@
     if (!cred || !cred.val) throw new Error('Invalid PIN');
     const cacheKey = `${cred.type}:${cred.val}`;
 
-    if (!SESSION_CACHE || SESSION_CACHE.cacheKey !== cacheKey || (Date.now() - SESSION_CACHE.fetchedAt) > 15000) {
+    if (!SESSION_CACHE || SESSION_CACHE.cacheKey !== cacheKey || (Date.now() - SESSION_CACHE.fetchedAt) > 60000) {
       const m = await loadManifest();
       const dir = await fetchAuthDir();
       const tagPrefix = cred.type === 'pin' ? 'pin:' : 'tok:';
@@ -258,7 +326,7 @@
     return arr;
   }
 
-  async function readWhState(sess) {
+  async function readWhState(sess, { strict = false } = {}) {
     try {
       const raw = await npGet(sess.whBinUrl);
       if (raw && raw.enc) {
@@ -269,7 +337,19 @@
           seen: st.seen || {},
         };
       }
-    } catch {}
+      if (strict) throw new Error('Warehouse state missing');
+    } catch (e) {
+      if (strict) throw e;
+      const cached = loadCachedBin(sess.whBinUrl);
+      if (cached && cached.enc) {
+        const st = await aesDecryptJson(sess.whKeyBytes, cached.enc);
+        return {
+          items_patch: st.items_patch || {},
+          uploads: Array.isArray(st.uploads) ? st.uploads : [],
+          seen: st.seen || {},
+        };
+      }
+    }
     return { items_patch: {}, uploads: [], seen: {} };
   }
 
@@ -278,7 +358,7 @@
     await npPost(sess.whBinUrl, { enc, v: 1 });
   }
 
-  async function readPhilState(sess) {
+  async function readPhilState(sess, { strict = false } = {}) {
     try {
       const raw = await npGet(sess.philBinUrl);
       if (raw && raw.enc) {
@@ -291,7 +371,21 @@
           seen: st.seen || {},
         };
       }
-    } catch {}
+      if (strict) throw new Error('Inventory review state missing');
+    } catch (e) {
+      if (strict) throw e;
+      const cached = loadCachedBin(sess.philBinUrl);
+      if (cached && cached.enc) {
+        const st = await aesDecryptJson(sess.fullKeyBytes, cached.enc);
+        return {
+          items_patch: st.items_patch || {},
+          action_log: Array.isArray(st.action_log) ? st.action_log : [],
+          nudge_state: st.nudge_state || {},
+          nudge_log: Array.isArray(st.nudge_log) ? st.nudge_log : [],
+          seen: st.seen || {},
+        };
+      }
+    }
     return { items_patch: {}, action_log: [], nudge_state: {}, nudge_log: [], seen: {} };
   }
 
@@ -821,8 +915,8 @@
 
         const [seed, whState, philState] = await Promise.all([
           loadSeedItems(sess),
-          readWhState(sess),
-          readPhilState(sess),
+          readWhState(sess, { strict: true }),
+          readPhilState(sess, { strict: true }),
         ]);
         const merged = mergeItems(seed, whState, philState, false);
         const idx = merged.findIndex((it) => it.item_code === code);
@@ -974,8 +1068,8 @@
         const sess = await authenticate(authQueryStr, ['phil', 'admin']);
         const [seed, whState, philState] = await Promise.all([
           loadSeedItems(sess),
-          readWhState(sess),
-          readPhilState(sess),
+          readWhState(sess, { strict: true }),
+          readPhilState(sess, { strict: true }),
         ]);
         const last = philState.action_log.pop();
         if (!last) throw new Error('Nothing to undo');
@@ -1045,7 +1139,7 @@
 
         const [seed, whState] = await Promise.all([
           loadSeedItems(sess),
-          readWhState(sess),
+          readWhState(sess, { strict: true }),
         ]);
         await hydrateUploadedPhotos(sess, whState.uploads);
         const merged = mergeItems(seed, whState, null, sess.user.role === 'warehouse');
@@ -1131,7 +1225,7 @@
           d.setMinutes(d.getMinutes() + 60);
         }
         const until = nowSql(d);
-        const philState = await readPhilState(sess);
+        const philState = await readPhilState(sess, { strict: true });
         philState.nudge_state = philState.nudge_state || {};
         philState.nudge_state.snooze_until = until;
         philState.nudge_state.updated_at = nowSql();
@@ -1143,7 +1237,7 @@
     if (action === 'admin_settings') {
       return withMutex(async () => {
         const sess = await authenticate(authQueryStr, ['admin']);
-        const philState = await readPhilState(sess);
+        const philState = await readPhilState(sess, { strict: true });
         philState.nudge_state = philState.nudge_state || {};
         const blitz = body.blitz_mode ? 1 : 0;
         const webhook = String(body.ghl_webhook_url || '').trim();
@@ -1160,7 +1254,7 @@
     if (action === 'admin_user_save') {
       return withMutex(async () => {
         const sess = await authenticate(authQueryStr, ['admin']);
-        const dir = await fetchAuthDir();
+        const dir = await fetchAuthDir({ strict: true });
         const adminUsersState = await aesDecryptJson(sess.adminKeyBytes, dir.admin_users_enc);
         const users = adminUsersState.users || [];
 
@@ -1232,7 +1326,7 @@
     if (action === 'admin_user_toggle') {
       return withMutex(async () => {
         const sess = await authenticate(authQueryStr, ['admin']);
-        const dir = await fetchAuthDir();
+        const dir = await fetchAuthDir({ strict: true });
         const adminUsersState = await aesDecryptJson(sess.adminKeyBytes, dir.admin_users_enc);
         let users = adminUsersState.users || [];
 
@@ -1293,7 +1387,7 @@
         ? sess.user.name
         : (String(actor || 'Warehouse').replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 32) || 'Warehouse');
       const kind = ['unit', 'tag', 'general'].includes(shot_kind) ? shot_kind : 'general';
-      const [seed, whState] = await Promise.all([loadSeedItems(sess), readWhState(sess)]);
+      const [seed, whState] = await Promise.all([loadSeedItems(sess), readWhState(sess, { strict: true })]);
       await hydrateUploadedPhotos(sess, whState.uploads);
 
       const ab = await blob.arrayBuffer();
