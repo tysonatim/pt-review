@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PT Review">
+  <meta name="theme-color" content="#0B1120">
+  <title>PT Review — Inventory Review</title>
+  <link rel="manifest" href="manifest.json?v=6">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=1">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png?v=1">
+  <link rel="stylesheet" href="style.css?v=6">
+</head>
+<body>
+
+  <!-- PIN GATE SCREEN (Bypassed automatically via ?k= SMS Magic Link or saved token) -->
+  <section id="login-screen" class="screen active">
+    <div class="login-wrap">
+      <img src="icon-192.png" alt="PT Review" class="login-icon">
+      <h1>PT Medical Price Review</h1>
+      <p class="login-sub">Enter PIN (or tap any SMS sprint link)</p>
+      <div class="pin-dots" id="pin-dots">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <div class="pin-grid" id="pin-grid">
+        <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+        <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+        <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+        <button class="pin-clear" data-k="clr">CLR</button><button data-k="0">0</button><button class="pin-del" data-k="del">DEL</button>
+      </div>
+      <p id="login-error" class="login-error"></p>
+    </div>
+  </section>
+
+  <!-- MAIN MOBILE CARD SPRINT SCREEN -->
+  <section id="app-screen" class="screen">
+    <header id="phil-hud" class="top-hud">
+      <div class="mode-row">
+        <button class="mode-pill active" data-mode="Anywhere_High">
+          <span class="mp-label">$2k+</span>
+          <span class="mp-count" id="cnt-high">0</span>
+        </button>
+        <button class="mode-pill" data-mode="Warehouse_Walk">
+          <span class="mp-label">Cam</span>
+          <span class="mp-count" id="cnt-wh">0</span>
+        </button>
+        <button class="mode-pill" data-mode="Stock_Sweep_Sub2k">
+          <span class="mp-label">&lt;$2k</span>
+          <span class="mp-count" id="cnt-sweep">0</span>
+        </button>
+        <button class="mode-pill" data-mode="Grid_All">
+          <span class="mp-label">Grid</span>
+          <span class="mp-count" id="cnt-all">685</span>
+        </button>
+        <button id="btn-more" class="hud-icon-btn" aria-label="More options">&#8943;</button>
+      </div>
+
+      <div class="sprint-row">
+        <div class="sprint-left">
+          <button id="btn-back-grid" class="chip-btn chip-back-grid hidden">&larr; Grid</button>
+          <span id="sprint-label" class="sprint-label">Queue: 115 left · 0 done</span>
+        </div>
+        <div class="sprint-right">
+          <span id="sync-badge" class="sync-badge hidden">Syncing...</span>
+          <button id="btn-snooze" class="chip-btn">Snooze 1h</button>
+          <button id="btn-undo" class="chip-btn chip-undo" disabled>Undo</button>
+        </div>
+      </div>
+
+      <div class="master-progress-track">
+        <div id="master-progress-fill" class="master-progress-fill"></div>
+      </div>
+    </header>
+
+    <!-- LOCKED-DOWN WAREHOUSE PHOTO-ONLY HUD -->
+    <header id="wh-only-hud" class="top-hud hidden">
+      <div class="wh-hud-row">
+        <div>
+          <div class="wh-hud-title">PT Warehouse Photo Queue</div>
+          <div class="wh-hud-sub" id="wh-only-count">0 items needing photos</div>
+        </div>
+        <div class="wh-hud-right">
+          <button id="btn-switch-actor" class="chip-btn">Actor &#9662;</button>
+          <button id="btn-wh-logout" class="chip-btn">PIN</button>
+        </div>
+      </div>
+      <div class="master-progress-track">
+        <div id="wh-progress-fill" class="master-progress-fill"></div>
+      </div>
+    </header>
+
+    <!-- ACTIVE CARD STAGE -->
+    <main id="card-stage" class="card-stage">
+      <!-- Empty Deck State -->
+      <div id="deck-empty" class="deck-empty hidden">
+        <div class="empty-check">DONE</div>
+        <h2 id="empty-title">Deck Cleared!</h2>
+        <p id="empty-desc">All items in this mode have been reviewed.</p>
+        <div class="empty-actions">
+          <button id="btn-next-deck" class="btn-primary-full">Jump to Next Queue</button>
+          <button id="btn-review-done" class="btn-ghost-full">Browse Completed Items in This Deck</button>
+        </div>
+      </div>
+
+      <!-- Product Review Card -->
+      <article id="card-body" class="review-card">
+        <div class="photo-box" id="photo-box">
+          <img id="card-photo" src="" alt="Equipment photo" class="card-photo hidden">
+          <div id="photo-placeholder" class="photo-placeholder hidden">
+            <div class="ph-badge">NO PHOTO ON FILE</div>
+            <p id="ph-reason" class="ph-reason"></p>
+          </div>
+
+          <span id="qty-badge" class="overlay-badge badge-qty">QTY: 1</span>
+          <span id="code-badge" class="overlay-badge badge-code">R000</span>
+
+          <button id="btn-prev-photo" class="photo-nav photo-prev hidden" aria-label="Previous photo">&lsaquo;</button>
+          <button id="btn-next-photo" class="photo-nav photo-next hidden" aria-label="Next photo">&rsaquo;</button>
+          <span id="photo-counter" class="overlay-badge badge-pcount hidden">1 / 1</span>
+        </div>
+
+        <div class="card-meta-scroll">
+          <div id="fleet-banner" class="alert-banner alert-amber hidden"></div>
+          <div id="action-banner" class="alert-banner alert-blue hidden"></div>
+          <div id="status-pill-row" class="status-pill-row hidden"></div>
+
+          <h2 id="card-title" class="card-title" title="Tap to expand">Loading...</h2>
+          <div id="card-specs" class="card-specs"></div>
+
+          <div id="live-sync-row" class="live-sync-row">
+            <span id="live-ask-pill" class="meta-pill"></span>
+            <span id="wh-num-pill" class="meta-pill hidden"></span>
+            <span id="consignor-pill" class="meta-pill meta-purple hidden"></span>
+          </div>
+
+          <!-- HERO PRICE BLOCK (Modes 1 & 3) -->
+          <div id="hero-price-box" class="hero-price-box">
+            <div class="hp-head-row">
+              <div class="hp-kicker" id="hp-kicker">SUGGESTED LIST / BIN PRICE</div>
+              <button id="btn-comps" class="comps-btn">Comps &amp; Tiers &#9662;</button>
+            </div>
+            <div class="hp-main-row">
+              <span id="hp-price" class="hp-price">$0</span>
+              <span id="hp-unit" class="hp-unit"></span>
+            </div>
+            <div id="hp-subline" class="hp-subline"></div>
+          </div>
+
+          <!-- WAREHOUSE CAMERA UPLOAD GALLERY & VOICE NOTE (Mode 2 Phil) -->
+          <div id="wh-capture-box" class="wh-capture-box hidden">
+            <div id="wh-thumbs" class="wh-thumbs hidden"></div>
+            <label class="wh-note-label">
+              <span>Optional quick voice/text note (tap keyboard mic):</span>
+              <input type="text" id="wh-note-input" class="wh-note-input" placeholder="e.g. Powers on, SN A1234, clean...">
+            </label>
+          </div>
+
+          <!-- WAREHOUSE STAFF 2-SHOT PHOTO GATE (Role = warehouse, ZERO PRICES) -->
+          <div id="wh-staff-box" class="wh-staff-box hidden">
+            <input type="file" id="cam-unit-input" accept="image/*" capture="environment" class="hidden-file">
+            <input type="file" id="cam-tag-input" accept="image/*" capture="environment" class="hidden-file">
+
+            <div class="shot-slot-grid">
+              <button id="btn-shot-unit" class="shot-slot-btn">
+                <span class="ss-num">1</span>
+                <span class="ss-text">
+                  <strong>Full Unit Photo</strong>
+                  <small id="lbl-shot-unit">Tap camera — required</small>
+                </span>
+              </button>
+              <button id="btn-shot-tag" class="shot-slot-btn">
+                <span class="ss-num">2</span>
+                <span class="ss-text">
+                  <strong>Model / Serial Plate</strong>
+                  <small id="lbl-shot-tag">Tap camera — required</small>
+                </span>
+              </button>
+            </div>
+
+            <div id="wh-staff-thumbs" class="wh-thumbs hidden"></div>
+
+            <label class="no-sticker-row">
+              <input type="checkbox" id="chk-no-sticker">
+              <span>No readable model/serial sticker exists on this unit</span>
+            </label>
+
+            <input type="text" id="wh-staff-note" class="wh-note-input" placeholder="Optional: Bay #, powers on, missing cables...">
+          </div>
+        </div>
+      </article>
+    </main>
+
+    <!-- ALL INVENTORY GRID VIEW TAB -->
+    <main id="grid-stage" class="grid-stage hidden">
+      <div class="grid-toolbar">
+        <div class="grid-search-row">
+          <input type="search" id="grid-search" class="grid-search-input" placeholder="Search 685 items (name, SKU, R#)...">
+          <select id="grid-sort" class="grid-sort-select" aria-label="Sort items">
+            <option value="price_desc">$ High &rarr; Low</option>
+            <option value="price_asc">$ Low &rarr; High</option>
+            <option value="code">Item ID</option>
+          </select>
+        </div>
+        <div id="grid-filters" class="grid-filter-row">
+          <button class="gf-pill active" data-gf="all">All</button>
+          <button class="gf-pill" data-gf="pending">Needs Review</button>
+          <button class="gf-pill" data-gf="Anywhere_High">$2k+</button>
+          <button class="gf-pill" data-gf="Warehouse_Walk">Cam</button>
+          <button class="gf-pill" data-gf="Stock_Sweep_Sub2k">&lt;$2k</button>
+          <button class="gf-pill" data-gf="done">Approved</button>
+          <button class="gf-pill" data-gf="oos">Sold / OOS</button>
+          <button class="gf-pill" data-gf="Consignment">Consignment</button>
+        </div>
+        <div id="grid-summary" class="grid-summary">Showing 685 items</div>
+      </div>
+      <div id="grid-scroll" class="grid-scroll">
+        <div id="grid-cards" class="grid-cards"></div>
+        <div id="grid-load-more" class="grid-load-more"></div>
+      </div>
+    </main>
+
+    <!-- FIXED THUMB ACTION DOCK -->
+    <footer id="thumb-dock" class="thumb-dock">
+      <!-- Mode 1: Anywhere High ($2k+) -->
+      <div id="dock-high" class="dock-mode">
+        <button id="btn-approve" class="btn-approve">Approve $0</button>
+        <div class="dock-sub-row-4">
+          <button id="btn-edit-price" class="btn-sub btn-amber">Change $</button>
+          <button id="btn-oos" class="btn-sub btn-red">Sold</button>
+          <button id="btn-to-wh" class="btn-sub btn-blue">Need Photo</button>
+          <button id="btn-skip-high" class="btn-sub btn-slate">Skip &raquo;</button>
+        </div>
+      </div>
+
+      <!-- Mode 2: Warehouse Camera Walk (Phil) -->
+      <div id="dock-wh" class="dock-mode hidden">
+        <input type="file" id="camera-input" accept="image/*" capture="environment" multiple class="hidden-file">
+        <div id="wh-cam-primary-wrap">
+          <button id="btn-snap-photo" class="btn-cam-primary">Snap Unit &amp; Serial Tag</button>
+        </div>
+        <div id="wh-cam-done-wrap" class="dock-split-row hidden">
+          <button id="btn-snap-more" class="btn-sub btn-blue">+ Photo</button>
+          <button id="btn-wh-done" class="btn-approve">Save Photo &amp; Next</button>
+        </div>
+        <div class="dock-sub-row">
+          <button id="btn-wh-trash" class="btn-sub btn-red">Trash / Gone</button>
+          <button id="btn-wh-price" class="btn-sub btn-amber">Price It</button>
+          <button id="btn-wh-skip" class="btn-sub btn-slate">Skip &raquo;</button>
+        </div>
+      </div>
+
+      <!-- Role: Locked-Down Warehouse Staff Photo Queue -->
+      <div id="dock-wh-staff" class="dock-mode hidden">
+        <button id="btn-wh-submit" class="btn-approve" disabled>Upload Photos 1 &amp; 2 Above First</button>
+        <div class="dock-sweep-row">
+          <button id="btn-wh-cant-find" class="btn-sub btn-red">Can't Find It (Ask Phil)</button>
+          <button id="btn-wh-staff-skip" class="btn-sub btn-slate">Skip &raquo;</button>
+        </div>
+      </div>
+
+      <!-- Mode 3: Stock Sweep (<$2k) / Optional Consignment -->
+      <div id="dock-sweep" class="dock-mode hidden">
+        <div class="dock-sweep-row">
+          <button id="btn-sweep-gone" class="btn-gone-big">Gone / Sold</button>
+          <button id="btn-sweep-have" class="btn-approve">Still Have</button>
+        </div>
+        <div class="dock-sub-row">
+          <button id="btn-sweep-price" class="btn-sub btn-amber">Change $</button>
+          <button id="btn-sweep-wh" class="btn-sub btn-blue">Need Photo</button>
+          <button id="btn-sweep-skip" class="btn-sub btn-slate">Skip &raquo;</button>
+        </div>
+      </div>
+    </footer>
+  </section>
+
+  <!-- ADMIN SCREEN -->
+  <section id="admin-screen" class="screen">
+    <header class="admin-header">
+      <button id="btn-admin-back" class="chip-btn">&larr; Card App</button>
+      <h2>Tyson Admin &amp; Audit</h2>
+      <div class="admin-head-actions">
+        <a id="btn-export-csv" href="#" class="chip-btn">CSV</a>
+        <a id="btn-export-json" href="#" class="chip-btn">JSON</a>
+      </div>
+    </header>
+    <div id="admin-body" class="admin-body">
+      <div id="admin-progress-cards" class="admin-grid"></div>
+
+      <div class="admin-card">
+        <div class="admin-card-head">
+          <div>
+            <h3>Users, PINs &amp; Magic Links</h3>
+            <p class="admin-card-sub">Create personal 4-digit PINs &amp; 1-tap links, rotate links, or revoke access instantly.</p>
+          </div>
+          <button id="btn-add-user" class="btn-small-primary">+ Add User</button>
+        </div>
+        <div id="admin-users-list" class="admin-users-list"></div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Aggressive SMS Nudge &amp; Escalation Settings</h3>
+        <div class="admin-form">
+          <label class="toggle-row">
+            <input type="checkbox" id="adm-blitz">
+            <span><strong>6x/Day ADHD Blitz Mode</strong> (adds 10:30 AM &amp; 4:45 PM pings on top of 8:30 AM, 12:15 PM, 3:15 PM, 6:45 PM CST)</span>
+          </label>
+          <label>
+            GHL Inbound Webhook URL:
+            <input type="url" id="adm-webhook" placeholder="https://services.leadconnectorhq.com/hooks/...">
+          </label>
+          <label>
+            Deployed App URL:
+            <input type="url" id="adm-baseurl" placeholder="https://www.imwebpros.com/pt-review/">
+          </label>
+          <div class="admin-btn-row">
+            <button id="btn-save-admin" class="btn-small-primary">Save Settings</button>
+            <button id="btn-test-nudge" class="btn-small-amber">Test Nudge Now (Dry Run)</button>
+            <button id="btn-copy-magic" class="btn-small-slate">Copy Phil Link</button>
+            <button id="btn-copy-wh" class="btn-small-slate">Copy Warehouse Link (?w=...)</button>
+          </div>
+          <pre id="adm-test-out" class="admin-pre hidden"></pre>
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Warehouse Photo Accountability</h3>
+        <div id="admin-wh-board" class="admin-changes-list"></div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Phil Changes, Price Edits &amp; Uploads (<span id="adm-chg-cnt">0</span>)</h3>
+        <div id="admin-changes-list" class="admin-changes-list"></div>
+      </div>
+
+      <div class="admin-card">
+        <h3>Recent Nudge Log</h3>
+        <div id="admin-nudge-log" class="admin-changes-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODAL: CHANGE PRICE SHEET -->
+  <div id="modal-price" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3>Adjust Price / Qty</h3>
+        <button class="sheet-close" data-close="modal-price">Close</button>
+      </div>
+      <div class="sheet-body">
+        <div class="pct-chips">
+          <button type="button" class="pct-btn" data-pct="0.75">-25%</button>
+          <button type="button" class="pct-btn" data-pct="0.85">-15%</button>
+          <button type="button" class="pct-btn active" data-pct="1">Orig</button>
+          <button type="button" class="pct-btn" data-pct="1.15">+15%</button>
+          <button type="button" class="pct-btn" data-pct="1.25">+25%</button>
+        </div>
+
+        <div class="price-mode-toggle">
+          <button type="button" class="pm-btn active" data-pm="bin">List / Buy-It-Now ($)</button>
+          <button type="button" class="pm-btn" data-pm="expected">Expected Clear ($)</button>
+        </div>
+
+        <div class="big-input-wrap">
+          <span class="dollar-prefix">$</span>
+          <input type="text" id="inp-price" inputmode="numeric" pattern="[0-9]*" autocomplete="off">
+        </div>
+
+        <div class="qty-row">
+          <span>Quantity (<span id="edit-basis-lbl">Each</span>):</span>
+          <div class="stepper">
+            <button type="button" id="qty-minus">-</button>
+            <input type="text" id="inp-qty" inputmode="numeric" pattern="[0-9]*" value="1" autocomplete="off">
+            <button type="button" id="qty-plus">+</button>
+          </div>
+        </div>
+
+        <div id="tier-live-preview" class="tier-live-preview"></div>
+
+        <input type="text" id="inp-price-note" class="note-input" placeholder="Optional note (condition, missing cables, etc.)">
+        <button id="btn-save-price" class="btn-approve">Save New Price &amp; Next</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: COMPS & FULL DETAILS -->
+  <div id="modal-comps" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3>Price Tiers &amp; Secondary Comps</h3>
+        <button class="sheet-close" data-close="modal-comps">Close</button>
+      </div>
+      <div id="comps-sheet-body" class="sheet-body comps-sheet-body"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: SPRINT COMPLETE CELEBRATION -->
+  <div id="modal-sprint" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet sprint-modal-sheet">
+      <div class="sprint-win-badge">SPRINT COMPLETE</div>
+      <h2 id="spr-headline">5 Cards Cleared!</h2>
+      <p id="spr-sub" class="spr-sub"></p>
+      <div class="sprint-metrics">
+        <div class="sm-box"><span class="sm-val" id="spr-val">$0</span><span class="sm-lbl">Sprint Value</span></div>
+        <div class="sm-box"><span class="sm-val" id="spr-today">0</span><span class="sm-lbl">Today Total</span></div>
+        <div class="sm-box"><span class="sm-val" id="spr-streak">1d</span><span class="sm-lbl">Streak</span></div>
+      </div>
+      <button id="btn-sprint-next" class="btn-approve">Do Another 5 Cards (~60s)</button>
+      <button id="btn-sprint-stop" class="btn-ghost-full">Pause Here (All Auto-Saved)</button>
+    </div>
+  </div>
+
+  <!-- MODAL: SNOOZE -->
+  <div id="modal-snooze" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3>Pause &amp; Remind Me Later</h3>
+        <button class="sheet-close" data-close="modal-snooze">Close</button>
+      </div>
+      <div class="sheet-body snooze-options">
+        <button class="snooze-opt" data-snooze="60m">Remind me in 1 Hour (Quick 5-card nudge)</button>
+        <button class="snooze-opt" data-snooze="3h">Remind me in 3 Hours</button>
+        <button class="snooze-opt" data-snooze="tonight">Remind me at 7:00 PM Tonight</button>
+        <button class="snooze-opt" data-snooze="tomorrow">Remind me Tomorrow at 8:30 AM</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: MORE DRAWER -->
+  <div id="modal-more" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3>Other Queues &amp; Tools</h3>
+        <button class="sheet-close" data-close="modal-more">Close</button>
+      </div>
+      <div class="sheet-body more-options">
+        <button class="more-opt" data-jump="Consignment">Consignment Inventory (Pre-Priced &middot; <span id="more-cnt-con">97</span>)</button>
+        <button class="more-opt" data-jump="done_phil">Already Reviewed by Phil (<span id="more-cnt-done">22</span>)</button>
+        <button id="btn-toggle-completed" class="more-opt">Show / Re-Check Completed Items in Current Mode</button>
+        <button id="btn-open-search" class="more-opt">Search Any Item by Name / SKU / R#</button>
+        <button id="btn-open-admin" class="more-opt more-admin">Tyson Admin &amp; Nudge Controls</button>
+        <button id="btn-logout" class="more-opt more-danger">Log Out / Lock PIN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: QUICK SEARCH -->
+  <div id="modal-search" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3>Jump to Specific Card</h3>
+        <button class="sheet-close" data-close="modal-search">Close</button>
+      </div>
+      <div class="sheet-body">
+        <input type="search" id="inp-search" class="note-input" placeholder="Type R37, PTCMED, OEC, Medrad...">
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULLSCREEN PHOTO ZOOM -->
+  <div id="modal-zoom" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="zoom-wrap">
+      <button class="zoom-close" data-close="modal-zoom">Close Zoom</button>
+      <img id="zoom-img" src="" alt="Full equipment view">
+    </div>
+  </div>
+
+  <!-- MODAL: WAREHOUSE STAFF PICKER -->
+  <div id="modal-actor" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3>Who is taking photos today?</h3>
+      </div>
+      <div id="actor-options-list" class="sheet-body snooze-options">
+        <button class="snooze-opt actor-pick" data-actor="Brody">Brody (Head of Warehouse)</button>
+        <button class="snooze-opt actor-pick" data-actor="Dan">Dan (Warehouse &amp; Driver)</button>
+        <button class="snooze-opt actor-pick" data-actor="Warehouse">Other Warehouse Staff</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / EDIT USER & PIN -->
+  <div id="modal-user" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="sheet-head">
+        <h3 id="modal-user-title">Add User &amp; PIN</h3>
+        <button class="sheet-close" data-close="modal-user">Close</button>
+      </div>
+      <div class="sheet-body">
+        <input type="hidden" id="usr-id" value="0">
+        <label class="uf-label">
+          <span>Display Name (logged on every tap/photo)</span>
+          <input type="text" id="usr-name" class="note-input" maxlength="40" placeholder="e.g. Brody, Emily, Phil">
+        </label>
+        <label class="uf-label">
+          <span>Access Role</span>
+          <select id="usr-role" class="note-input">
+            <option value="warehouse">Warehouse Photo-Only (Zero Prices)</option>
+            <option value="phil">Price &amp; Inventory Reviewer (Full Decks)</option>
+            <option value="admin">Admin (Review + Users &amp; Settings)</option>
+          </select>
+        </label>
+        <label class="uf-label">
+          <span>4-Digit Numeric PIN</span>
+          <div class="pin-input-row">
+            <input type="text" id="usr-pin" class="note-input pin-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="1234">
+            <button type="button" id="btn-gen-pin" class="btn-small-slate">Random PIN</button>
+          </div>
+        </label>
+        <label id="usr-shared-wrap" class="toggle-row">
+          <input type="checkbox" id="usr-shared">
+          <span>Shared kiosk/crew login (prompts "Who is taking photos?" picker instead of locking attribution to this name)</span>
+        </label>
+        <label id="usr-rotate-wrap" class="toggle-row hidden">
+          <input type="checkbox" id="usr-rotate">
+          <span>Generate new 1-tap magic link (revokes their old SMS/bookmark link)</span>
+        </label>
+        <p id="usr-form-err" class="login-error hidden"></p>
+        <button type="button" id="btn-save-user" class="btn-approve">Save User &amp; PIN</button>
+        <button type="button" id="btn-delete-user" class="btn-ghost-full more-danger hidden">Delete User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- UNDO TOAST -->
+  <div id="toast" class="toast hidden">
+    <span id="toast-msg">Saved</span>
+    <button id="toast-undo" class="toast-undo hidden">UNDO</button>
+  </div>
+
+  <script src="cloud-api.js?v=6"></script>
+  <script src="app.js?v=6"></script>
+</body>
+</html>
