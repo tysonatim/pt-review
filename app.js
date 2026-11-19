@@ -181,7 +181,7 @@
     return Math.round(v / 50) * 50;
   }
 
-  function previewTiers(entered, mode = 'bin', conf = 'medium') {
+  function previewTiers(entered, mode = 'bin', conf = 'medium', card = null) {
     const val = Math.max(1, Math.round(Number(entered) || 1));
     let bin, exp;
     if (mode === 'expected') {
@@ -192,12 +192,21 @@
       exp = roundClean(bin / 1.22);
       if (exp >= bin) exp = Math.max(1, bin - (bin < 25 ? 2 : bin < 250 ? 5 : 25));
     }
-    let reserve = roundClean(exp * (conf === 'low' ? 0.6 : 0.68));
-    if (exp >= 10) reserve = Math.max(10, reserve);
-    reserve = Math.max(1, Math.min(reserve, exp));
-    let startBid = roundClean(Math.max(exp < 30 ? 5 : 10, reserve * 0.55));
-    startBid = Math.max(1, Math.min(startBid, reserve));
-    let floor = Math.max(reserve, Math.min(roundClean(Math.max(reserve, exp * 0.8)), exp));
+    const isKasCostAnchored = card && /^KAS-/i.test(String(card.item_code || '')) && Number(card.orig_reserve_price || 0) > 0;
+    let reserve, startBid, floor;
+    if (isKasCostAnchored) {
+      reserve = Math.max(1, Math.min(exp, Math.round(Number(card.orig_reserve_price))));
+      startBid = roundClean(Math.max(exp < 30 ? 5 : 10, reserve * 0.50));
+      startBid = Math.max(1, Math.min(startBid, reserve));
+      floor = Math.max(reserve, Math.min(roundClean(Math.max(reserve, exp * 0.60)), exp));
+    } else {
+      reserve = roundClean(exp * (conf === 'low' ? 0.6 : 0.68));
+      if (exp >= 10) reserve = Math.max(10, reserve);
+      reserve = Math.max(1, Math.min(reserve, exp));
+      startBid = roundClean(Math.max(exp < 30 ? 5 : 10, reserve * 0.55));
+      startBid = Math.max(1, Math.min(startBid, reserve));
+      floor = Math.max(reserve, Math.min(roundClean(Math.max(reserve, exp * 0.8)), exp));
+    }
     let ceiling = roundClean(Math.max(bin * 1.18, exp * (conf === 'low' ? 1.55 : 1.7)));
     if (ceiling <= bin) ceiling = bin + (exp < 25 ? 2 : exp < 250 ? 5 : 25);
     return { startBid, reserve, floor, exp, bin, ceiling };
@@ -635,7 +644,7 @@
       const maxR = Math.max(0, ...state.cards.filter((c) => c.deck === 'Warehouse_Walk').map((c) => c.deck_rank)) + 1;
       card.deck_rank = maxR;
     } else if (decision === 'change_price') {
-      const t = previewTiers(extra.new_price, extra.price_mode || 'bin', card.comp_confidence || 'medium');
+      const t = previewTiers(extra.new_price, extra.price_mode || 'bin', card.comp_confidence || 'medium', card);
       card.start_bid = t.startBid;
       card.reserve_price = t.reserve;
       card.expected_price = t.exp;
@@ -874,8 +883,8 @@
     const card = currentCard();
     if (!card) return;
     const conf = card.comp_confidence || 'medium';
-    const baseBin = card.bin_price || (card.expected_price ? previewTiers(card.expected_price, 'expected', conf).bin : (card.live_ask || 500));
-    const baseExp = card.expected_price || previewTiers(baseBin, 'bin', conf).exp;
+    const baseBin = card.bin_price || (card.expected_price ? previewTiers(card.expected_price, 'expected', conf, card).bin : (card.live_ask || 500));
+    const baseExp = card.expected_price || previewTiers(baseBin, 'bin', conf, card).exp;
     state.editBaseBin = baseBin;
     state.editBaseExp = baseExp;
     state.editPriceMode = 'bin';
@@ -892,7 +901,7 @@
 
   function refreshPricePreview() {
     const card = currentCard();
-    const t = previewTiers($('inp-price').value, state.editPriceMode, (card && card.comp_confidence) || 'medium');
+    const t = previewTiers($('inp-price').value, state.editPriceMode, (card && card.comp_confidence) || 'medium', card);
     const qty = Math.max(1, Number($('inp-qty').value || 1));
     const isLot = card && String(card.basis).toLowerCase() === 'lot';
     const multiLine = (!isLot && qty > 1)
@@ -1336,7 +1345,7 @@
         const nextMode = b.dataset.pm;
         if (nextMode === state.editPriceMode) return;
         const card = currentCard();
-        const curTiers = previewTiers($('inp-price').value, state.editPriceMode, (card && card.comp_confidence) || 'medium');
+        const curTiers = previewTiers($('inp-price').value, state.editPriceMode, (card && card.comp_confidence) || 'medium', card);
         state.editPriceMode = nextMode;
         document.querySelectorAll('.pm-btn').forEach((x) => x.classList.toggle('active', x === b));
         if (state.editPct !== null) {

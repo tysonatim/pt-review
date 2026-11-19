@@ -310,7 +310,7 @@
   async function loadSeedItems(sess) {
     if (sess.user.role === 'warehouse') {
       if (SEED_CACHE.warehouse) return SEED_CACHE.warehouse;
-      const res = await fetch('vault/seed_wh.enc.json?v=8');
+      const res = await fetch('vault/seed_wh.enc.json?v=9');
       if (!res.ok) throw new Error('Could not load warehouse vault');
       const enc = await res.json();
       const arr = await aesDecryptJson(sess.whKeyBytes, enc);
@@ -318,7 +318,7 @@
       return arr;
     }
     if (SEED_CACHE.full) return SEED_CACHE.full;
-    const res = await fetch('vault/seed_full.enc.json?v=8');
+    const res = await fetch('vault/seed_full.enc.json?v=9');
     if (!res.ok) throw new Error('Could not load inventory vault');
     const enc = await res.json();
     const arr = await aesDecryptJson(sess.fullKeyBytes, enc);
@@ -544,7 +544,7 @@
     return Math.round(v / 50) * 50;
   }
 
-  function recomputePriceTiers(enteredPrice, mode = 'bin', conf = 'medium') {
+  function recomputePriceTiers(enteredPrice, mode = 'bin', conf = 'medium', item = null) {
     const entered = Math.max(1, Math.round(Number(enteredPrice) || 1));
     let bin, exp;
     if (mode === 'expected') {
@@ -560,17 +560,27 @@
       exp = Math.max(1, Math.min(exp, bin));
     }
 
-    const resMult = (conf === 'high' || conf === 'medium') ? 0.68 : 0.60;
-    let reserve = roundClean(exp * resMult);
-    if (exp >= 10) reserve = Math.max(10, reserve);
-    reserve = Math.max(1, Math.min(reserve, exp));
-
+    const isKasCostAnchored = item && /^KAS-/i.test(String(item.item_code || '')) && Number(item.orig_reserve_price || 0) > 0;
     const minStart = exp < 30 ? 5 : 10;
-    let startBid = roundClean(Math.max(minStart, reserve * 0.55));
-    startBid = Math.max(1, Math.min(startBid, reserve));
+    let reserve, startBid, floor;
+    if (isKasCostAnchored) {
+      reserve = Math.max(1, Math.min(Math.round(Number(item.orig_reserve_price)), exp));
+      startBid = roundClean(Math.max(minStart, reserve * 0.50));
+      startBid = Math.max(1, Math.min(startBid, reserve));
+      floor = roundClean(Math.max(reserve, exp * 0.60));
+      floor = Math.max(reserve, Math.min(floor, exp));
+    } else {
+      const resMult = (conf === 'high' || conf === 'medium') ? 0.68 : 0.60;
+      reserve = roundClean(exp * resMult);
+      if (exp >= 10) reserve = Math.max(10, reserve);
+      reserve = Math.max(1, Math.min(reserve, exp));
 
-    let floor = roundClean(Math.max(reserve, exp * 0.80));
-    floor = Math.max(reserve, Math.min(floor, exp));
+      startBid = roundClean(Math.max(minStart, reserve * 0.55));
+      startBid = Math.max(1, Math.min(startBid, reserve));
+
+      floor = roundClean(Math.max(reserve, exp * 0.80));
+      floor = Math.max(reserve, Math.min(floor, exp));
+    }
 
     const ceilMult = (conf === 'high' || conf === 'medium') ? 1.70 : 1.55;
     let ceiling = roundClean(Math.max(bin * 1.18, exp * ceilMult));
@@ -989,7 +999,7 @@
           if (body.phil_note !== undefined) newNote = String(body.phil_note).trim();
           if (body.new_price !== undefined && Number(body.new_price) > 0) {
             const pMode = body.price_mode === 'expected' ? 'expected' : 'bin';
-            prices = recomputePriceTiers(body.new_price, pMode, item.comp_confidence || 'medium');
+            prices = recomputePriceTiers(body.new_price, pMode, item.comp_confidence || 'medium', item);
             if (newBasis === 'PENDING ID') newBasis = 'Each';
           }
           if (prices.expected_price !== null) {
@@ -1001,7 +1011,7 @@
           const pMode = body.price_mode === 'expected' ? 'expected' : 'bin';
           if (body.new_qty !== undefined && Number(body.new_qty) > 0) newQty = Number(body.new_qty);
           if (newBasis === 'PENDING ID') newBasis = 'Each';
-          prices = recomputePriceTiers(entered, pMode, item.comp_confidence || 'medium');
+          prices = recomputePriceTiers(entered, pMode, item.comp_confidence || 'medium', item);
           newExpLine = newBasis === 'Lot' ? Number(prices.expected_price) : Number(prices.expected_price) * newQty;
           newStatus = 'price_changed';
           if (body.phil_note !== undefined) newNote = String(body.phil_note).trim();
