@@ -310,7 +310,7 @@
   async function loadSeedItems(sess) {
     if (sess.user.role === 'warehouse') {
       if (SEED_CACHE.warehouse) return SEED_CACHE.warehouse;
-      const res = await fetch('vault/seed_wh.enc.json');
+      const res = await fetch('vault/seed_wh.enc.json?v=8');
       if (!res.ok) throw new Error('Could not load warehouse vault');
       const enc = await res.json();
       const arr = await aesDecryptJson(sess.whKeyBytes, enc);
@@ -318,7 +318,7 @@
       return arr;
     }
     if (SEED_CACHE.full) return SEED_CACHE.full;
-    const res = await fetch('vault/seed_full.enc.json');
+    const res = await fetch('vault/seed_full.enc.json?v=8');
     if (!res.ok) throw new Error('Could not load inventory vault');
     const enc = await res.json();
     const arr = await aesDecryptJson(sess.fullKeyBytes, enc);
@@ -772,7 +772,7 @@
         const cards = merged
           .filter((c) => c.deck === 'Warehouse_Walk' && c.review_status === 'pending')
           .sort((a, b) => (a.deck_rank - b.deck_rank) || (a.id - b.id));
-        const whTot = merged.filter((c) => c.orig_deck === 'Warehouse_Walk' || c.deck === 'Warehouse_Walk').length;
+        const whTot = merged.filter((c) => c.orig_deck === 'Warehouse_Walk' || c.deck === 'Warehouse_Walk' || c.wh_flag === 'photos_ready' || c.wh_flag === 'cant_find').length;
         const whPend = cards.length;
         return {
           ok: true,
@@ -1163,13 +1163,15 @@
           const isPendingId = String(item.basis || '').toUpperCase() === 'PENDING ID';
           const notePiece = `[${actor} Photos${noSticker ? ' (No Sticker)' : ''}]${whNote ? ' ' + whNote : ''}`;
           const mergedNote = item.phil_note ? `${notePiece} | ${item.phil_note}` : notePiece;
-          const targetDeck = item.orig_deck === 'Stock_Sweep_Sub2k' ? 'Stock_Sweep_Sub2k' : 'Anywhere_High';
+          const isConsignOrigin = item.orig_deck === 'Consignment';
+          const targetDeck = isConsignOrigin ? 'Consignment' : (item.orig_deck === 'Stock_Sweep_Sub2k' ? 'Stock_Sweep_Sub2k' : 'Anywhere_High');
+          const targetStatus = isConsignOrigin ? 'pre_approved_consign' : 'pending';
 
           whState.items_patch[code] = isPendingId
             ? { review_status: 'tag_captured', wh_flag: 'photos_ready', wh_actor: actor, wh_updated_at: now, reviewed_at: now, phil_note: mergedNote, updated_at: now }
-            : { deck: targetDeck, deck_rank: 0, review_status: 'pending', wh_flag: 'photos_ready', wh_actor: actor, wh_updated_at: now, phil_note: mergedNote, updated_at: now };
+            : { deck: targetDeck, deck_rank: 0, review_status: targetStatus, wh_flag: 'photos_ready', wh_actor: actor, wh_updated_at: now, phil_note: mergedNote, updated_at: now };
         } else if (whAct === 'cant_find') {
-          const targetDeck = item.orig_deck === 'Stock_Sweep_Sub2k' ? 'Stock_Sweep_Sub2k' : 'Anywhere_High';
+          const targetDeck = item.orig_deck === 'Stock_Sweep_Sub2k' || item.orig_deck === 'Consignment' ? 'Stock_Sweep_Sub2k' : 'Anywhere_High';
           const notePiece = `[${actor} COULD NOT LOCATE IN WAREHOUSE]${whNote ? ' ' + whNote : ''}`;
           const mergedNote = item.phil_note ? `${notePiece} | ${item.phil_note}` : notePiece;
           whState.items_patch[code] = {
@@ -1192,7 +1194,7 @@
 
         const freshMerged = mergeItems(seed, whState, null, sess.user.role === 'warehouse');
         const freshItem = freshMerged.find((it) => it.item_code === code);
-        const whTot = freshMerged.filter((c) => c.orig_deck === 'Warehouse_Walk' || c.deck === 'Warehouse_Walk').length;
+        const whTot = freshMerged.filter((c) => c.orig_deck === 'Warehouse_Walk' || c.deck === 'Warehouse_Walk' || c.wh_flag === 'photos_ready' || c.wh_flag === 'cant_find').length;
         const whPend = freshMerged.filter((c) => c.deck === 'Warehouse_Walk' && c.review_status === 'pending').length;
 
         return {
